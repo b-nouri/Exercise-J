@@ -6,6 +6,8 @@ library(stringr)
 library(ggplot2)
 library(forecast)
 library(imputeTS)
+library(tseries)
+library(summarytools)
 
 #--------Load Data-------------------------------------------
 main_data <- read.csv("c:/excercise/excercise.csv", 
@@ -18,7 +20,11 @@ colnames(main_data)[2] <- "freight"
 df <- main_data %>%
   separate(Year.week, c("year", "week"), "/") %>%
   mutate(week = as.numeric(week)) %>%
-  mutate(year = as.numeric(year)) %>%
+  mutate(year = as.numeric(year))
+
+summary(df)
+
+df <- df %>%
   filter(week %in% c(1:52))
 
 
@@ -117,23 +123,43 @@ seasonplot(ts1,season.labels = TRUE)
 
 plot(forecast(auto.arima(ts1)))
 
+fit <- auto.arima(ts1)
+print(summary(fit))
+checkresiduals(fit)
+
+
+ggseasonplot(ts1)
+ggsubseriesplot(ts1)
+
+
+
 ###--------Test autocorrelation----######
-first_years_df <- df2[1:(8*52),]
-last_year_df <- df2[(8*52+1):468,]
+#Testing the stationarity of the data
+first_years_df <- df2[1:(7*52),]
+last_year_df <- df2[(7*52+1):(9*52),]
+year_eight_df <- df2[(7*52+1):(8*52),]
+year_nine_df <- df2[(8*52+1):(9*52),]
 
-##Durbin Watson##
-dwtest(df2[-468,3] ~ df2[-1,3]) #Autocorrelation lag 1 is present!
-dwtest(first_years_df[-416,3] ~ first_years_df[-1,3])
-dwtest(last_year_df[-52,3]~last_year_df[-1,3])
+#Augmented Dickey-Fuller Test
+adf.test(ts1) 
+adf.test(first_years_df$freight)
+adf.test(last_year_df$freight) #!!!!!!!last two years are non stationary!!!!!!!!!
 
-##ACF Test##
-acf(df2$freight)
-acf(first_years_df$freight, main = "gg", xaxt="n")
-acf(last_year_df$freight, main = "gg", xaxt="n")
 
-pacf(df2$freight)
-pacf(first_years_df$freight)
-pacf(last_year_df$freight)
+#Autocorrelation test
+autoplot(acf(last_year_df$freight,plot=TRUE))+ labs(title="Correlogram of frieght data")
+autoplot(acf(first_years_df$freight,plot=TRUE))+ labs(title="Correlogram of frieght data")
+autoplot(acf(year_eight_df$freight,plot=TRUE))+ labs(title="Correlogram of frieght data")
+autoplot(acf(year_nine_df$freight,plot=TRUE))+ labs(title="Correlogram of frieght data")
+
+
+#partial Autocorrelation test
+autoplot(pacf(first_years_df$freight,plot=TRUE))+ labs(title="Correlogram of frieght data")
+autoplot(pacf(last_year_df$freight,plot=TRUE))+ labs(title="Correlogram of frieght data")
+autoplot(pacf(year_eight_df$freight,plot=TRUE))+ labs(title="Correlogram of frieght data")
+autoplot(pacf(year_nine_df$freight,plot=TRUE))+ labs(title="Correlogram of frieght data")
+
+
 
 
 ###------Train-Test Split--------####
@@ -215,9 +241,28 @@ acf(ts1, plot = T, main = "ACF Plot of CPI", xaxt="n")
 pacf(ts1, plot = T, main = "ACF Plot of CPI", xaxt="n")
 
 
-modelcv <- CVar(lynx, k=5, lambda=0.15)
-print(modelcv)
 train_data <- window(ts1,start = 2012,end = 2019)
 
+
+##AR MODEL
+model = ARIMA(ts_log, order=c(2, 1, 0))  
+results_AR = model.fit(disp=-1)  
+plt.plot(ts_log_diff)
+plt.plot(results_AR.fittedvalues, color='red')
+plt.title('RSS: %.4f'% sum((results_AR.fittedvalues-ts_log_diff)**2))
+
+###MA Model
+model = ARIMA(ts_log, order=c(0, 1, 2))  
+results_MA = model.fit(disp=-1)  
+plt.plot(ts_log_diff)
+plt.plot(results_MA.fittedvalues, color='red')
+plt.title('RSS: %.4f'% sum((results_MA.fittedvalues-ts_log_diff)**2))
+
+#combined model
+model = ARIMA(ts_log, order=(2, 1, 2))  
+results_ARIMA = model.fit(disp=-1)  
+plt.plot(ts_log_diff)
+plt.plot(results_ARIMA.fittedvalues, color='red')
+plt.title('RSS: %.4f'% sum((results_ARIMA.fittedvalues-ts_log_diff)**2))
 
 
