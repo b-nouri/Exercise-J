@@ -1,18 +1,11 @@
 #---------Load Libraries ------------------------------------
 library(plyr)
 library(tidyverse)
-library(naniar)
-library(VIM)
-library(DMwR)
-library(caret)
-library(PerformanceAnalytics)
 library(visdat)
 library(stringr)
-library(dplyr)
-library(tidyr)
 library(ggplot2)
-
-
+library(forecast)
+library(imputeTS)
 
 #--------Load Data-------------------------------------------
 main_data <- read.csv("c:/excercise/excercise.csv", 
@@ -20,14 +13,14 @@ main_data <- read.csv("c:/excercise/excercise.csv",
 colnames(main_data)[2] <- "freight"
 
 
+
+####-----------Preprocessing Data-----------###
 df <- main_data %>%
   separate(Year.week, c("year", "week"), "/") %>%
   mutate(week = as.numeric(week)) %>%
   mutate(year = as.numeric(year)) %>%
-  filter(week %in% c(1:52)) %>%
-  mutate(freight = replace_na(freight, median(freight,na.rm = TRUE)))
+  filter(week %in% c(1:52))
 
-#check and impute NAs after done
 
 for(i in df$year){
   for(j in 1:52){
@@ -38,55 +31,179 @@ for(i in df$year){
   }
 }
 
-miss<-data.frame(c(2017,2018),c(13,21),c(0,0))
+miss<-data.frame(c(2017,2018),c(13,21),c(NA,NA))
 names(miss)<-names(df)
-newdf <- rbind(df, miss)
+df2 <- rbind(df, miss)
+
+df2 <- df2 %>%
+  arrange(year,week)
+
+vis_miss(df2)
+ggplot_na_distribution(df2$freight)
+
+df1 <- df2 %>%
+  mutate(freight = ifelse(df2$freight == 0, NA,df2$freight))
+
+df2 <- df1 %>%
+  mutate(freight = na_interpolation(df1$freight,option = "stine"))
+ggplot_na_imputations(df1$freight, df2$freight)
 
 
-newdf <- newdf %>%
-  arrange(year,week) %>%
-  mutate(year_week = paste(week,"-",year)) %>%
-  mutate(year_week = gsub(" ", "", year_week)) %>%
-  mutate(date= as.Date(paste(newdf$year, newdf$week, 1, sep="-"), "%Y-%W-%u")) %>%
-  mutate(freight = ifelse(freight==0, median(freight,na.rm = TRUE),freight))
+df2 <- df2 %>%
+  arrange(year,week) 
 
-#check for NA impute
-
-sum(is.na(df))
-
-
-
+# %>%
+#   mutate(year_week = paste(week,"-",year)) %>%
+#   mutate(year_week = gsub(" ", "", year_week)) %>%
+#   mutate(date= as.Date(paste(df2$year, df2$week, 2, sep="-"), "%Y-%W-%w"))
 
 # Make the plot
-for(i in 1:9){
-  p <- ggplot(newdf[((i-1)*52+ 1):((i-1)*52+ 51),], aes(x=date, y=freight)) +
-    geom_line(color="red", size=1.1) +
-    theme_minimal() +
-    xlab("") +
-    ylab("Fright size") +
-    ggtitle("freight units being shipped Westbound (RTM to KGH)", 
-            subtitle = paste("From January", 2011+i, "Until December", 2011+i))
-  print(p)
-}
-p <- ggplot(newdf[,], aes(x=date, y=freight)) +
-  geom_line(color="red", size=1.1) +
-  theme_minimal() +
-  xlab("") +
-  ylab("Consumer Price Index") +
-  ggtitle("Indonesia's Consumer Price Index", subtitle = "From December 2002 Until April 2020")
-p
+# for(i in 1:9){
+#   p <- ggplot(df2[((i-1)*52+ 1):((i-1)*52+ 52),], aes(x=date, y=freight)) +
+#     geom_line(color="red", size=1.1) +
+#     theme_minimal() +
+#     xlab("") +
+#     ylab("Fright size") +
+#     ggtitle("freight units being shipped Westbound (RTM to KGH)", 
+#             subtitle = paste("From January", 2011+i, "Until December", 2011+i))
+#   print(p)
+# }
+# 
+# for(i in 1:3){
+#   p <- ggplot(df2[((i-1)*156+ 1):((i-1)*156+ 156),], aes(x=week, y=freight)) +
+#     geom_line(color="red", size=1.1) +
+#     theme_minimal() +
+#     xlab("") +
+#     ylab("Fright size") +
+#     ggtitle("freight units being shipped Westbound (RTM to KGH)", 
+#             subtitle = paste("From January", (2012+(i-1)*3), "Until December", (2011+(i*3))))
+#   print(p)
+# }
+# 
+# p <- ggplot(newdf[,], aes(x=date, y=freight)) +
+#   geom_line(color="red", size=1.1) +
+#   theme_minimal() +
+#   xlab("") +
+#   ylab("Fright size") +
+#   ggtitle("freight units being shipped Westbound (RTM to KGH)", subtitle = "From December 2002 Until April 2020")
+# p
+
+# ggplot(df2[1:156,], aes(x=date, y=freight)) +
+#   geom_line(color="red", size=1.1) +
+#   theme_minimal()
 
 
-# Get the statistical summary
-# Returns data frame and sort based on the CPI
-newdf %>%
-  arrange(desc(freight))
+ggplot(df2,aes(x=as.factor(year),y=freight,col=as.factor(year))) +
+  geom_boxplot()
+
+ggplot(df2,aes(x=week,y=freight),col=as.factor(year),col = factor(year)) +
+  geom_line(aes(color=as.factor(year)),size=1.1) +
+  theme_minimal() + 
+  facet_wrap(~as.factor(year))
+
+ggplot(df2,aes(x=as.factor(week),y=freight,col=as.factor(week))) +
+  geom_boxplot()
+
+boxplot(df2$freight)
 
 
-ts1 <- ts(newdf$freight, frequency = 52, start = c(2012, 1))
+###----------Time series analysis----##########
+ts1 <- ts(df2$freight, frequency = 52, start = c(2012, 1))
 ts1
 
-library(tseries)
+monthplot(ts1,labels = 1:52, xlab = "weeks")
+seasonplot(ts1,season.labels = TRUE)
+
+
+plot(forecast(auto.arima(ts1)))
+
+###--------Test autocorrelation----######
+first_years_df <- df2[1:(8*52),]
+last_year_df <- df2[(8*52+1):468,]
+
+##Durbin Watson##
+dwtest(df2[-468,3] ~ df2[-1,3]) #Autocorrelation lag 1 is present!
+dwtest(first_years_df[-416,3] ~ first_years_df[-1,3])
+dwtest(last_year_df[-52,3]~last_year_df[-1,3])
+
+##ACF Test##
+acf(df2$freight)
+acf(first_years_df$freight, main = "gg", xaxt="n")
+acf(last_year_df$freight, main = "gg", xaxt="n")
+
+pacf(df2$freight)
+pacf(first_years_df$freight)
+pacf(last_year_df$freight)
+
+
+###------Train-Test Split--------####
+train_data <- window(ts1,start = 2012,end = 2018)
+plot(train_data)
+
+test_data <- window(ts1,start=2019)
+plot(test_data)
+
+dev.off()
+
+mydec <- decompose(ts1,type="additive")
+
+tsadjusted <- ts1-mydec$seasonal
+plot(tsadjusted)
+plot(mydec$seasonal)
+
+mydec2 <- decompose(ts1,type="multiplicative")
+
+autoplot(mydec2)
+tsadjusted2 <- ts1-mydec2$seasonal
+plot(tsadjusted2)
+plot(mydec2$seasonal)
+
+
+myarima <- stlf(ts1,method="arima")
+
+plot(myarima)
+
+autoplot(decompose(ts1,type="additive"))
+autoplot(decompose(train_data))
+autoplot(decompose(test_data))
+
+
+##-----forecasts----####
+meanm <- meanf(train_data,h=52)
+naivem <- naive(train_data,h=52)
+driftm <- rwf(train_data,h=52,drift=TRUE)
+
+accuracy(meanm,test_data)
+accuracy(naivem,test_data)
+accuracy(driftm,test_data)
+
+hist(driftm$residuals)
+
+acf(train_data, plot = T)
+acf(test_data, plot = T)
+
+##Model selection##
+
+train_data2 <- window(ts1,start = 2018,end = 2019)
+
+etsmodel <- ets(train_data)
+
+plot(train_data2,lwd=3)
+lines(etsmodel$fitted,col="red")
+
+plot(forecast(etsmodel,h=52,level=95))
+
+auto.arima(train_data,trace = T,stepwise = F, approximation = F)
+
+
+best_model <- Arima(train_data,c(1,0,2),c(2,1,0))
+autoplot(forecast(best_model,h=12))
+#ARIMA(1,0,2)(2,1,0)[52]
+autoplot(test_data)
+
+Box.test(best_model$residuals,lag=5,type="Ljung-Box")
+
+
 adf.test(ts1) # p-value < 0.05 indicates the TS is stationary
 kpss.test(ts1)
 #plot.ts(ts1)
@@ -96,6 +213,11 @@ kpss.test(ts1)
 
 acf(ts1, plot = T, main = "ACF Plot of CPI", xaxt="n")
 pacf(ts1, plot = T, main = "ACF Plot of CPI", xaxt="n")
+
+
+modelcv <- CVar(lynx, k=5, lambda=0.15)
+print(modelcv)
+train_data <- window(ts1,start = 2012,end = 2019)
 
 
 
