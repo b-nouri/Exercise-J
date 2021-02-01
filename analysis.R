@@ -7,7 +7,6 @@ library(ggplot2)
 library(forecast)
 library(imputeTS)
 library(tseries)
-library(summarytools)
 
 #--------Load Data-------------------------------------------
 main_data <- read.csv("c:/excercise/excercise.csv", 
@@ -27,7 +26,7 @@ summary(df)
 df <- df %>%
   filter(week %in% c(1:52))
 
-
+#searching for the missing weeks
 for(i in df$year){
   for(j in 1:52){
     if(!(j %in% df[which(df$year==i),c("week")])){
@@ -44,12 +43,14 @@ df2 <- rbind(df, miss)
 df2 <- df2 %>%
   arrange(year,week)
 
+##Visualization of missing values
 vis_miss(df2)
 ggplot_na_distribution(df2$freight)
 
 df1 <- df2 %>%
   mutate(freight = ifelse(df2$freight == 0, NA,df2$freight))
 
+#interpolation of missing values
 df2 <- df1 %>%
   mutate(freight = na_interpolation(df1$freight,option = "stine"))
 ggplot_na_imputations(df1$freight, df2$freight)
@@ -58,47 +59,8 @@ ggplot_na_imputations(df1$freight, df2$freight)
 df2 <- df2 %>%
   arrange(year,week) 
 
-# %>%
-#   mutate(year_week = paste(week,"-",year)) %>%
-#   mutate(year_week = gsub(" ", "", year_week)) %>%
-#   mutate(date= as.Date(paste(df2$year, df2$week, 2, sep="-"), "%Y-%W-%w"))
 
-# Make the plot
-# for(i in 1:9){
-#   p <- ggplot(df2[((i-1)*52+ 1):((i-1)*52+ 52),], aes(x=date, y=freight)) +
-#     geom_line(color="red", size=1.1) +
-#     theme_minimal() +
-#     xlab("") +
-#     ylab("Fright size") +
-#     ggtitle("freight units being shipped Westbound (RTM to KGH)", 
-#             subtitle = paste("From January", 2011+i, "Until December", 2011+i))
-#   print(p)
-# }
-# 
-# for(i in 1:3){
-#   p <- ggplot(df2[((i-1)*156+ 1):((i-1)*156+ 156),], aes(x=week, y=freight)) +
-#     geom_line(color="red", size=1.1) +
-#     theme_minimal() +
-#     xlab("") +
-#     ylab("Fright size") +
-#     ggtitle("freight units being shipped Westbound (RTM to KGH)", 
-#             subtitle = paste("From January", (2012+(i-1)*3), "Until December", (2011+(i*3))))
-#   print(p)
-# }
-# 
-# p <- ggplot(newdf[,], aes(x=date, y=freight)) +
-#   geom_line(color="red", size=1.1) +
-#   theme_minimal() +
-#   xlab("") +
-#   ylab("Fright size") +
-#   ggtitle("freight units being shipped Westbound (RTM to KGH)", subtitle = "From December 2002 Until April 2020")
-# p
-
-# ggplot(df2[1:156,], aes(x=date, y=freight)) +
-#   geom_line(color="red", size=1.1) +
-#   theme_minimal()
-
-
+####-----------EDA--------------------###########
 ggplot(df2,aes(x=as.factor(year),y=freight,col=as.factor(year))) +
   geom_boxplot()
 
@@ -120,7 +82,7 @@ ts1
 monthplot(ts1,labels = 1:52, xlab = "weeks")
 seasonplot(ts1,season.labels = TRUE)
 
-
+autoplot(decompose(ts1))
 plot(forecast(auto.arima(ts1)))
 
 fit <- auto.arima(ts1)
@@ -136,7 +98,7 @@ ggsubseriesplot(ts1)
 ###--------Test autocorrelation----######
 #Testing the stationarity of the data
 first_years_df <- df2[1:(7*52),]
-last_year_df <- df2[(7*52+1):(9*52),]
+last_years_df <- df2[(7*52+1):(9*52),]
 year_eight_df <- df2[(7*52+1):(8*52),]
 year_nine_df <- df2[(8*52+1):(9*52),]
 
@@ -160,109 +122,184 @@ autoplot(pacf(year_eight_df$freight,plot=TRUE))+ labs(title="Correlogram of frie
 autoplot(pacf(year_nine_df$freight,plot=TRUE))+ labs(title="Correlogram of frieght data")
 
 
-
-
-###------Train-Test Split--------####
-train_data <- window(ts1,start = 2012,end = 2018)
+###------Premilnary Model selection--------####
+train_data <- window(ts1,start =2012,2015)
 plot(train_data)
 
-test_data <- window(ts1,start=2019)
-plot(test_data)
 
-dev.off()
+test_data <- window(ts1,start=c(2015,1),end=c(2015,14))
 
-mydec <- decompose(ts1,type="additive")
+harmonics <- fourier(train_data, K = 13)
 
-tsadjusted <- ts1-mydec$seasonal
-plot(tsadjusted)
-plot(mydec$seasonal)
+# Fit regression model with ARIMA errors
+fit <- auto.arima(train_data, xreg = harmonics, seasonal = FALSE)
 
-mydec2 <- decompose(ts1,type="multiplicative")
+# Forecasts next 3 years
+newharmonics <- fourier(train_data, K = 13, h = length(test_data))
+fc <- forecast(fit, xreg = newharmonics)
 
-autoplot(mydec2)
-tsadjusted2 <- ts1-mydec2$seasonal
-plot(tsadjusted2)
-plot(mydec2$seasonal)
+accuracy(fc,test_data)
 
+xreg = harmonics
+gastbats <- tbats(train_data)
+fc2 <- forecast(gastbats, h= length(test_data))
+best_train_2 <- auto.arima(train_data,trace = T,stepwise = F, approximation = F)
+#best_model <- Arima(train_data,c(0,1,2),c(0,1,0))
 
-myarima <- stlf(ts1,method="arima")
-
-plot(myarima)
-
-autoplot(decompose(ts1,type="additive"))
-autoplot(decompose(train_data))
-autoplot(decompose(test_data))
+armia_forecast <- forecast(best_train_2,h = length(test_data), level = 0.89)
+#best_forecast <- forecast(best_model,h = length(test_data), level = 0.89)
 
 
-##-----forecasts----####
-meanm <- meanf(train_data,h=52)
-naivem <- naive(train_data,h=52)
-driftm <- rwf(train_data,h=52,drift=TRUE)
-
-accuracy(meanm,test_data)
-accuracy(naivem,test_data)
-accuracy(driftm,test_data)
-
-hist(driftm$residuals)
-
-acf(train_data, plot = T)
-acf(test_data, plot = T)
-
-##Model selection##
-
-train_data2 <- window(ts1,start = 2018,end = 2019)
-
-etsmodel <- ets(train_data)
-
-plot(train_data2,lwd=3)
-lines(etsmodel$fitted,col="red")
-
-plot(forecast(etsmodel,h=52,level=95))
-
-auto.arima(train_data,trace = T,stepwise = F, approximation = F)
+accuracy(fc2,test_data)
+accuracy(armia_forecast,test_data)
+#accuracy(best_forecast,test_data)
 
 
-best_model <- Arima(train_data,c(1,0,2),c(2,1,0))
-autoplot(forecast(best_model,h=12))
-#ARIMA(1,0,2)(2,1,0)[52]
-autoplot(test_data)
+#Best model1: ARIMA(0,1,2)(0,1,0)[52]  # for 2012-2014                
 
-Box.test(best_model$residuals,lag=5,type="Ljung-Box")
+#Best model2: ARIMA(1,1,2)(0,1,0)[52]  #for 2013-2015
 
+#Best model3: ARIMA(1,0,1)(1,1,0)[52]   #for 2014-2016 
 
-adf.test(ts1) # p-value < 0.05 indicates the TS is stationary
-kpss.test(ts1)
-#plot.ts(ts1)
-
-#as.Date(paste(df$year, df$week, 1, sep="-"), "%Y-%U-%u")
+#Best model: ARIMA(3,1,2)(0,1,0)[52]       #2016-2018             
 
 
-acf(ts1, plot = T, main = "ACF Plot of CPI", xaxt="n")
-pacf(ts1, plot = T, main = "ACF Plot of CPI", xaxt="n")
 
 
-train_data <- window(ts1,start = 2012,end = 2019)
+###########Cross Validation 1##########
+k <- 2 # minimum data length for fitting a model
+n <- 9
+mae1 <- mae2 <- mae3 <-mae4 <-mae5 <- mae6 <- matrix(NA,8,14)
+st <- tsp(ts1)[1]
+
+for(i in 1:7)
+{
+  xshort <- window(ts1, end=2013 +i)
+  xnext <- window(ts1, start=c((st +1 + i),1), end=c((st+ i+1 ),15))
+  fit1 <- tslm(xshort~ trend + season, lambda=0) ##h=5
+  fcast1 <- forecast(fit1, h=14)
+  
+
+fit2 <- Arima(xshort,c(0,1,2),c(0,1,0))
+fcast2 <- forecast(fit2, h=14)
+
+fit3 <- Arima(xshort,c(1,1,2),c(0,1,0))
+fcast3 <- forecast(fit3, h=14)
+
+fit4 <- Arima(xshort,c(3,1,2),c(0,1,0))
+fcast4 <- forecast(fit4, h=14)
+
+fit5 <- tbats(xshort) ##h = 4,7
+fcast5 <- forecast(fit5, h=14)
+
+fit6 <- auto.arima(xshort)
+fcast6 <- forecast(fit6, h=14)
+  
+  mae1[i,1:14] <- abs(fcast1[['mean']]-xnext)
+  mae2[i,1:14] <- abs(fcast2[['mean']]-xnext)
+  mae3[i,1:14] <- abs(fcast3[['mean']]-xnext)
+  mae4[i,1:14] <- abs(fcast4[['mean']]-xnext)
+  mae5[i,1:14] <- abs(fcast5[['mean']]-xnext)
+  mae6[i,1:14] <- abs(fcast6[['mean']]-xnext)
+}
 
 
-##AR MODEL
-model = ARIMA(ts_log, order=c(2, 1, 0))  
-results_AR = model.fit(disp=-1)  
-plt.plot(ts_log_diff)
-plt.plot(results_AR.fittedvalues, color='red')
-plt.title('RSS: %.4f'% sum((results_AR.fittedvalues-ts_log_diff)**2))
 
-###MA Model
-model = ARIMA(ts_log, order=c(0, 1, 2))  
-results_MA = model.fit(disp=-1)  
-plt.plot(ts_log_diff)
-plt.plot(results_MA.fittedvalues, color='red')
-plt.title('RSS: %.4f'% sum((results_MA.fittedvalues-ts_log_diff)**2))
+mae1_dt <- as.data.frame(colMeans(mae1,na.rm=TRUE))
+names(mae1_dt)[1] <- "MAE"
+ggplot(mae1_dt, aes(x=1:14,y=MAE)) +
+  geom_line()
 
-#combined model
-model = ARIMA(ts_log, order=(2, 1, 2))  
-results_ARIMA = model.fit(disp=-1)  
-plt.plot(ts_log_diff)
-plt.plot(results_ARIMA.fittedvalues, color='red')
-plt.title('RSS: %.4f'% sum((results_ARIMA.fittedvalues-ts_log_diff)**2))
+MAE1 <- as.data.frame(na.remove(rowMeans(mae1)))
+MAE2 <- as.data.frame(na.remove(rowMeans(mae2)))
+MAE3 <- as.data.frame(na.remove(rowMeans(mae3)))
+MAE4 <- as.data.frame(na.remove(rowMeans(mae4)))
+MAE5 <- as.data.frame(na.remove(rowMeans(mae5)))
+MAE6 <- as.data.frame(na.remove(rowMeans(mae6)))
+
+names(MAE1)[1] <- "MAE"
+names(MAE2)[1] <- "MAE"
+names(MAE3)[1] <- "MAE"
+names(MAE4)[1] <- "MAE"
+names(MAE5)[1] <- "MAE"
+names(MAE6)[1] <- "MAE"
+
+
+
+###-----Forecasting based on the best selected models----####
+
+k <- 2 # minimum data length for fitting a model
+n <- 9
+mae1 <- mae2 <- mae3 <-mae4 <-mae5 <- mae6 <- matrix(NA,8,14)
+st <- tsp(ts1)[1]
+
+  x_test <- window(ts1, start=2019)
+  
+  X_train1 <- window(ts1, start=2014,end=2019)
+  fit1 <- tslm(X_train1~ trend + season, lambda=0) ##h=5
+  fcast1 <- forecast(fit1, h=14)
+
+  
+  X_train2 <- window(ts1, start=2017,end=2019)
+  fit2 <- Arima(X_train2,c(3,1,2),c(0,1,0))
+  fcast2 <- forecast(fit2, h=14)
+  
+  X_train3 <- window(ts1, start=2015,end=2019)
+  fit3 <- tbats(X_train3) ##h = 4
+  fcast3 <- forecast(fit3, h=14)
+  
+  X_train4 <- window(ts1, start=2012,end=2019)
+  fit4 <- tbats(X_train4) ##h 7
+  fcast4 <- forecast(fit4, h=14)
+  
+  X_train5 <- window(ts1, start=2017,end=2019)
+  fit5 <- auto.arima(X_train5)
+  fcast5 <- forecast(fit5, h=14)
+  
+  X_train6 <- window(ts1, start=2016,end=2019)
+  fit6 <- auto.arima(X_train6)
+  fcast6 <- forecast(fit6, h=14)
+
+  
+  
+  mae_11 <- mean(abs(fcast1[['mean']]-x_test))
+  mae_21 <- mean(abs(fcast2[['mean']]-x_test))
+  mae_31 <- mean(abs(fcast3[['mean']]-x_test))
+  mae_41 <- mean(abs(fcast4[['mean']]-x_test))
+  mae_51 <- mean(abs(fcast5[['mean']]-x_test))
+  mae_61 <- mean(abs(fcast6[['mean']]-x_test))
+
+  mae_1
+  mae_2
+  mae_3
+  mae_4
+  mae_5
+  mae_6
+
+  mae_11
+  mae_21
+  mae_31
+  mae_41
+  mae_51
+  mae_61
+
+
+  
+  X_train_best <- window(ts1, start=2014)
+  fit_best <- tbats(X_train_best) ##h 7
+  fcast_best <- forecast(fit_best, h=14)
+  
+  
+  forescasted <- as.data.frame(fcast_best)
+  names(forescasted)[2] <- "pred"
+
+
+  
+    autoplot(fcast_best) + 
+    ggtitle("Freight Forecast Westbound (RTM to KGH) in Q1 of 2021 ") + 
+    ylab("Freight") +
+    coord_cartesian(xlim = c(2020.5, 2021.5)) +
+    theme_minimal()
+
 
 
